@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caarlos0/log"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/log"
 	"github.com/cheshir/ttlcache"
 	"github.com/hugolgst/rich-go/client"
 )
@@ -35,36 +36,54 @@ func main() {
 		_ = shareURLCache.Close()
 	}()
 
-	log.SetLevelFromString("warning")
+	log.SetLevel(log.WarnLevel)
 	if level := os.Getenv("LOG_LEVEL"); level != "" {
-		log.SetLevelFromString(level)
+		log.SetLevel(log.ParseLevel(level))
 	}
+
+	log.ErrorLevelStyle = lipgloss.NewStyle().
+		SetString("error").
+		Foreground(lipgloss.Color("#ed8796")).Width(6)
+	log.WarnLevelStyle = lipgloss.NewStyle().
+		SetString("warn").
+		Foreground(lipgloss.Color("#eed49f")).Width(6)
+	log.InfoLevelStyle = lipgloss.NewStyle().
+		SetString("info").
+		Foreground(lipgloss.Color("#8aadf4")).Width(6)
+	log.DebugLevelStyle = lipgloss.NewStyle().
+		SetString("debug").
+		Foreground(lipgloss.Color("#c6a0f6")).Width(6)
+	log.SetReportTimestamp(false)
+
 	ac := activityConnection{}
 	defer func() { ac.stop() }()
 
 	for {
 		if !isRunning("Music") {
-			log.WithField("sleep", longSleep).Warn("Apple Music is not running")
+			log.Warn("Apple Music is not running", "sleep", longSleep)
 			ac.stop()
 			time.Sleep(longSleep)
 			continue
 		}
+
 		if !isRunning("Discord") && !isRunning("Vesktop") {
-			log.WithField("sleep", longSleep).Warn("Discord is not running")
+			log.Warn("Discord is not running", "sleep", longSleep)
 			ac.stop()
 			time.Sleep(longSleep)
 			continue
 		}
+
 		details, err := getNowPlaying()
+
 		if err != nil {
 			if strings.Contains(err.Error(), "(-1728)") {
-				log.WithField("sleep", longSleep).Warn("Apple Music stopped running")
+				log.Warn("Apple Music stopped running", "sleep", longSleep)
 				ac.stop()
 				time.Sleep(longSleep)
 				continue
 			}
 
-			log.WithError(err).WithField("sleep", shortSleep).Error("will try again soon")
+			log.Error("will try again soon", "err", err, "sleep", shortSleep)
 			ac.stop()
 			time.Sleep(shortSleep)
 			continue
@@ -80,7 +99,7 @@ func main() {
 		}
 
 		if err := ac.play(details); err != nil {
-			log.WithError(err).Warn("could not set activity, will retry later")
+			log.Warn("could not set activity, will retry later", "err", err)
 		}
 
 		time.Sleep(shortSleep)
@@ -112,7 +131,7 @@ func tellMusic(s string) (string, error) {
 func getNowPlaying() (Details, error) {
 	init := time.Now()
 	defer func() {
-		log.WithField("took", time.Since(init)).Info("got info")
+		log.Info("got info", "took", time.Since(init))
 	}()
 
 	initialState, err := tellMusic("get {database id} of current track & {player position, player state}")
@@ -139,7 +158,7 @@ func getNowPlaying() (Details, error) {
 
 	cached, ok := songCache.Get(ttlcache.Int64Key(songID))
 	if ok {
-		log.WithField("songID", songID).Debug("got song from cache")
+		log.Debug("got song from cache", "songID", songID)
 		return Details{
 			Song:     cached.(Song),
 			Position: position,
@@ -227,7 +246,7 @@ func getMetadata(artist, album, song string) (Metadata, error) {
 	artistCached, artistOk := artistCache.Get(ttlcache.StringKey(key))
 
 	if artworkOk && shareURLOk && artistOk {
-		log.WithField("key", key).Debug("got album and artist artwork from cache")
+		log.Debug("got album and artist artwork from cache", "key", key)
 		return Metadata{
 			Artwork:       artworkCached.(string),
 			ShareURL:      shareURLCached.(string),
@@ -353,19 +372,13 @@ func (ac *activityConnection) play(details Details) error {
 	if ac.lastSongID == song.ID {
 		if details.Position >= ac.lastPosition {
 			log.
-				WithField("songID", song.ID).
-				WithField("position", details.Position).
-				Debug("ongoing activity, ignoring")
+				Debug("ongoing activity, ignoring", "songID", song.ID, "position", details.Position)
 			return nil
 		}
 	}
 
 	log.
-		WithField("lastSongID", ac.lastSongID).
-		WithField("songID", song.ID).
-		WithField("lastPosition", ac.lastPosition).
-		WithField("position", details.Position).
-		Debug("new event")
+		Debug("new event", "lastSongID", ac.lastSongID, "songID", song.ID, "lastPosition", ac.lastPosition, "position", details.Position)
 
 	ac.lastPosition = details.Position
 	ac.lastSongID = song.ID
@@ -375,7 +388,7 @@ func (ac *activityConnection) play(details Details) error {
 
 	if !ac.connected {
 		if err := client.Login("861702238472241162"); err != nil {
-			log.WithError(err).Fatal("could not create rich presence client")
+			log.Fatal("could not create rich presence client", "err", err)
 		}
 		ac.connected = true
 	}
@@ -411,14 +424,9 @@ func (ac *activityConnection) play(details Details) error {
 		return err
 	}
 
-	log.WithField("song", song.Name).
-		WithField("album", song.Album).
-		WithField("artist", song.Artist).
-		WithField("year", song.Year).
-		WithField("duration", time.Duration(song.Duration)*time.Second).
-		WithField("position", time.Duration(details.Position)*time.Second).
-		WithField("songlink", songlink(song)).
-		Warn("now playing")
+	log.
+		Warn("now playing", "song", song.Name, "album", song.Album, "artist", song.Artist, "year", song.Year, "duration", time.Duration(song.Duration)*time.Second, "position", time.Duration(details.Position)*time.Second, "songlink", songlink(song))
+
 	return nil
 }
 
