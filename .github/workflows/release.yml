@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    runs-on: ubuntu-latest
+    needs: ["build"]
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: build
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/*
+          draft: true
