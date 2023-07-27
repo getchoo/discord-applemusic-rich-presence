@@ -25,6 +25,7 @@ var (
 	songCache     = ttlcache.New(time.Minute)
 	artworkCache  = ttlcache.New(time.Minute)
 	shareURLCache = ttlcache.New(time.Minute)
+	artistCache   = ttlcache.New(time.Minute)
 )
 
 func main() {
@@ -179,15 +180,16 @@ func getNowPlaying() (Details, error) {
 	}
 
 	song := Song{
-		ID:       songID,
-		Name:     name,
-		Artist:   artist,
-		Album:    album,
-		Year:     year,
-		Duration: duration,
-		Artwork:  metadata.Artwork,
-		ShareURL: metadata.ShareURL,
-		ShareID:  metadata.ID,
+		ID:            songID,
+		Name:          name,
+		Artist:        artist,
+		Album:         album,
+		Year:          year,
+		Duration:      duration,
+		Artwork:       metadata.Artwork,
+		ArtistArtwork: metadata.ArtistArtwork,
+		ShareURL:      metadata.ShareURL,
+		ShareID:       metadata.ID,
 	}
 
 	songCache.Set(ttlcache.Int64Key(songID), song, 24*time.Hour)
@@ -206,26 +208,30 @@ type Details struct {
 }
 
 type Song struct {
-	ID       int64
-	Name     string
-	Artist   string
-	Album    string
-	Year     int
-	Duration float64
-	Artwork  string
-	ShareURL string
-	ShareID  string
+	ID            int64
+	Name          string
+	Artist        string
+	Album         string
+	Year          int
+	Duration      float64
+	Artwork       string
+	ArtistArtwork string
+	ShareURL      string
+	ShareID       string
 }
 
 func getMetadata(artist, album, song string) (Metadata, error) {
 	key := url.QueryEscape(strings.Join([]string{artist, album, song}, " "))
 	artworkCached, artworkOk := artworkCache.Get(ttlcache.StringKey(key))
 	shareURLCached, shareURLOk := shareURLCache.Get(ttlcache.StringKey(key))
-	if artworkOk && shareURLOk {
-		log.WithField("key", key).Debug("got album artwork from cache")
+	artistCached, artistOk := artistCache.Get(ttlcache.StringKey(key))
+
+	if artworkOk && shareURLOk && artistOk {
+		log.WithField("key", key).Debug("got album and artist artwork from cache")
 		return Metadata{
-			Artwork:  artworkCached.(string),
-			ShareURL: shareURLCached.(string),
+			Artwork:       artworkCached.(string),
+			ShareURL:      shareURLCached.(string),
+			ArtistArtwork: artistCached.(string),
 		}, nil
 	}
 
@@ -241,7 +247,7 @@ func getMetadata(artist, album, song string) (Metadata, error) {
 		return Metadata{}, err
 	}
 
-	var result getMetadataResult
+	var result getSongMetadataResult
 	if err := json.Unmarshal(bts, &result); err != nil {
 		return Metadata{}, err
 	}
@@ -255,16 +261,44 @@ func getMetadata(artist, album, song string) (Metadata, error) {
 	artwork = strings.Replace(artwork, "{h}", "512", 1)
 	shareURL := result.Songs.Data[0].Attributes.URL
 
+	artistMetadataURL := "https://tools.applemediaservices.com/api/apple-media/music/US/search.json?types=artists&limit=1&term=" + url.QueryEscape(trySplit(artist, []string{",", "&"})[0])
+	respArtist, err := http.Get(artistMetadataURL)
+	if err != nil {
+		return Metadata{}, err
+	}
+	defer respArtist.Body.Close()
+
+	btsArtist, err := io.ReadAll(respArtist.Body)
+	if err != nil {
+		return Metadata{}, err
+	}
+
+	var artistResult getArtistMetadataResult
+	if err := json.Unmarshal(btsArtist, &artistResult); err != nil {
+		return Metadata{}, err
+	}
+
+	var artistArtwork string
+
+	if len(artistResult.Artists.Data) > 0 {
+		artistArtwork = artistResult.Artists.Data[0].Attributes.Artwork.URL
+		artistArtwork = strings.Replace(artistArtwork, "{w}", "512", 1)
+		artistArtwork = strings.Replace(artistArtwork, "{h}", "512", 1)
+	}
+
 	artworkCache.Set(ttlcache.StringKey(key), artwork, time.Hour)
 	shareURLCache.Set(ttlcache.StringKey(key), shareURL, time.Hour)
+	artistCache.Set(ttlcache.StringKey(key), artistArtwork, time.Hour)
+
 	return Metadata{
-		ID:       id,
-		Artwork:  artwork,
-		ShareURL: shareURL,
+		ID:            id,
+		Artwork:       artwork,
+		ShareURL:      shareURL,
+		ArtistArtwork: artistArtwork,
 	}, nil
 }
 
-type getMetadataResult struct {
+type getSongMetadataResult struct {
 	Songs struct {
 		Data []struct {
 			ID         string `json:"id"`
@@ -278,10 +312,24 @@ type getMetadataResult struct {
 	} `json:"songs"`
 }
 
+type getArtistMetadataResult struct {
+	Artists struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Attributes struct {
+				Artwork struct {
+					URL string `json:"url"`
+				} `json:"artwork"`
+			} `json:"attributes"`
+		} `json:"data"`
+	} `json:"artists"`
+}
+
 type Metadata struct {
-	ID       string
-	Artwork  string
-	ShareURL string
+	ID            string
+	Artwork       string
+	ArtistArtwork string
+	ShareURL      string
 }
 
 type activityConnection struct {
@@ -301,6 +349,7 @@ func (ac *activityConnection) stop() {
 
 func (ac *activityConnection) play(details Details) error {
 	song := details.Song
+
 	if ac.lastSongID == song.ID {
 		if details.Position >= ac.lastPosition {
 			log.
@@ -310,6 +359,7 @@ func (ac *activityConnection) play(details Details) error {
 			return nil
 		}
 	}
+
 	log.
 		WithField("lastSongID", ac.lastSongID).
 		WithField("songID", song.ID).
@@ -322,6 +372,7 @@ func (ac *activityConnection) play(details Details) error {
 
 	start := time.Now().Add(-1 * time.Duration(details.Position) * time.Second)
 	end := time.Now().Add(time.Duration(song.Duration-details.Position) * time.Second)
+
 	if !ac.connected {
 		if err := client.Login("861702238472241162"); err != nil {
 			log.WithError(err).Fatal("could not create rich presence client")
@@ -336,6 +387,7 @@ func (ac *activityConnection) play(details Details) error {
 			Url:   song.ShareURL,
 		})
 	}
+
 	if link := songlink(song); link != "" {
 		buttons = append(buttons, &client.Button{
 			Label: "View on SongLink",
@@ -344,12 +396,12 @@ func (ac *activityConnection) play(details Details) error {
 	}
 
 	if err := client.SetActivity(client.Activity{
-		State:      fmt.Sprintf("by %s (%s)", song.Artist, song.Album),
-		Details:    song.Name,
+		Details:    fmt.Sprintf("%s · %s", song.Name, song.Artist),
+		State:      song.Album,
 		LargeImage: firstNonEmpty(song.Artwork, "applemusic"),
-		SmallImage: "play",
+		SmallImage: firstNonEmpty(song.ArtistArtwork, "play"),
 		LargeText:  song.Name,
-		SmallText:  fmt.Sprintf("%s by %s (%s)", song.Name, song.Artist, song.Album),
+		SmallText:  song.Artist,
 		Timestamps: &client.Timestamps{
 			Start: timePtr(start),
 			End:   timePtr(end),
@@ -374,6 +426,7 @@ func songlink(song Song) string {
 	if song.ShareID == "" {
 		return ""
 	}
+
 	return fmt.Sprintf("https://song.link/i/%s", song.ShareID)
 }
 
@@ -383,5 +436,17 @@ func firstNonEmpty(ss ...string) string {
 			return s
 		}
 	}
+
 	return ""
+}
+
+func trySplit(s string, seps []string) []string {
+	for _, sep := range seps {
+		parts := strings.Split(s, sep)
+		if len(parts) > 1 {
+			return parts
+		}
+	}
+
+	return []string{s}
 }
