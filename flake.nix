@@ -72,7 +72,7 @@
       in {
         options.services.discord-applemusic-rich-presence = {
           enable = mkEnableOption "discord-applemusic-rich-presence";
-          package = mkPackageOption packages "discord-applemusic-rich-presence" {};
+          package = mkPackageOption pkgs "discord-applemusic-rich-presence" {};
 
           logFile = mkOption {
             type = types.nullOr types.path;
@@ -97,6 +97,8 @@
                 StandardErrorPath = cfg.logFile;
               };
             };
+
+            nixpkgs.overlays = [overlays.default];
           })
         ];
       };
