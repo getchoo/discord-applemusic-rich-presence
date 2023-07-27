@@ -321,7 +321,7 @@ func (ac *activityConnection) play(details Details) error {
 	ac.lastSongID = song.ID
 
 	start := time.Now().Add(-1 * time.Duration(details.Position) * time.Second)
-	// end := time.Now().Add(time.Duration(song.Duration-details.Position) * time.Second)
+	end := time.Now().Add(time.Duration(song.Duration-details.Position) * time.Second)
 	if !ac.connected {
 		if err := client.Login("861702238472241162"); err != nil {
 			log.WithError(err).Fatal("could not create rich presence client")
@@ -352,7 +352,7 @@ func (ac *activityConnection) play(details Details) error {
 		SmallText:  fmt.Sprintf("%s by %s (%s)", song.Name, song.Artist, song.Album),
 		Timestamps: &client.Timestamps{
 			Start: timePtr(start),
-			// End:   timePtr(end),
+			End:   timePtr(end),
 		},
 		Buttons: buttons,
 	}); err != nil {
