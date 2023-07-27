@@ -18,7 +18,7 @@
     ];
 
     packageFn = pkgs: let
-      inherit (pkgs) lib;
+      inherit (pkgs) lib stdenv;
     in {
       discord-applemusic-rich-presence = pkgs.buildGoModule rec {
         pname = "discord-applemusic-rich-presence";
@@ -36,8 +36,8 @@
           homepage = "https://github.com/ryanccn/${pname}";
           license = lib.licenses.mit;
           maintainers = with lib.maintainers; [ryanccn];
-          platforms = with lib.platforms; [darwin];
-          broken = with lib.stdenv; [isLinux];
+          platforms = lib.platforms.darwin;
+          broken = stdenv.isLinux;
         };
       };
     };
