@@ -13,8 +13,6 @@
     version = builtins.substring 0 8 self.lastModifiedDate;
 
     systems = [
-      "x86_64-linux"
-      "aarch64-linux"
       "x86_64-darwin"
       "aarch64-darwin"
     ];
@@ -38,13 +36,15 @@
           homepage = "https://github.com/ryanccn/${pname}";
           license = lib.licenses.mit;
           maintainers = with lib.maintainers; [ryanccn];
+          platforms = with lib.platforms; [darwin];
+          broken = with lib.stdenv; [isLinux];
         };
       };
     };
 
     forAllSystems = nixpkgs.lib.genAttrs systems;
     nixpkgsFor = forAllSystems (system: import nixpkgs {inherit system;});
-  in {
+  in rec {
     devShells = forAllSystems (s: let
       pkgs = nixpkgsFor.${s};
       inherit (pkgs) mkShell;
@@ -60,5 +60,45 @@
       p // {default = p.discord-applemusic-rich-presence;});
 
     overlays.default = _: prev: (packageFn prev);
+
+    homeManagerModules.default = {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
+      with lib; let
+        cfg = config.services.discord-applemusic-rich-presence;
+      in {
+        options.services.discord-applemusic-rich-presence = {
+          enable = mkEnableOption "discord-applemusic-rich-presence";
+          package = mkPackageOption packages "discord-applemusic-rich-presence" {};
+
+          logFile = mkOption {
+            type = types.nullOr types.path;
+            default = null;
+            example = ''
+              ${config.xdg.cacheHome}/discord-applemusic-rich-presence.log
+            '';
+          };
+        };
+
+        config = mkMerge [
+          (mkIf cfg.enable {
+            launchd.agents.discord-applemusic-rich-presence = {
+              enable = true;
+
+              config = {
+                ProgramArguments = ["${cfg.package}/bin/discord-applemusic-rich-presence"];
+                KeepAlive = true;
+                RunAtLoad = true;
+
+                StandardOutPath = cfg.logFile;
+                StandardErrorPath = cfg.logFile;
+              };
+            };
+          })
+        ];
+      };
   };
 }
