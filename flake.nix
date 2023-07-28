@@ -44,7 +44,7 @@
 
     forAllSystems = nixpkgs.lib.genAttrs systems;
     nixpkgsFor = forAllSystems (system: import nixpkgs {inherit system;});
-  in rec {
+  in {
     devShells = forAllSystems (s: let
       pkgs = nixpkgsFor.${s};
       inherit (pkgs) mkShell;
@@ -61,18 +61,20 @@
 
     overlays.default = _: prev: (packageFn prev);
 
-    homeManagerModules.default = {
-      config,
-      lib,
-      pkgs,
-      ...
-    }:
-      with lib; let
+    homeManagerModules = {
+      default = {
+        config,
+        lib,
+        pkgs,
+        ...
+      }: let
         cfg = config.services.discord-applemusic-rich-presence;
+        selfPkgs = packageFn pkgs;
+        inherit (lib) mkEnableOption mkPackageOption mkOption mkMerge mkIf types;
       in {
         options.services.discord-applemusic-rich-presence = {
           enable = mkEnableOption "discord-applemusic-rich-presence";
-          package = mkPackageOption pkgs "discord-applemusic-rich-presence" {};
+          package = mkPackageOption selfPkgs "discord-applemusic-rich-presence" {};
 
           logFile = mkOption {
             type = types.nullOr types.path;
@@ -97,10 +99,9 @@
                 StandardErrorPath = cfg.logFile;
               };
             };
-
-            nixpkgs.overlays = [overlays.default];
           })
         ];
       };
+    };
   };
 }
